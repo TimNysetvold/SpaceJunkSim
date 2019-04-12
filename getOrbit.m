@@ -1,6 +1,6 @@
 function [randPos,randVel] = getOrbit(rangeOrbit,rangeVel,radOrbit)
     %debug code
-    rangeOrbit = 10000;
+    rangeOrbit = 1000;
     rangeVel = 100;
     radOrbit = 6371000 + 800000;            %The area of orbit I'm interested in (800 km area)
     

@@ -1,0 +1,33 @@
+function [objectDensity,riskToISS] = findStats(spaceArray)
+    objectDensity = 0;
+    riskToISS = 0;
+    numLargeObjects = 0;
+    numSmallObjects = 0;
+    for iterator=1:length(spaceArray)
+        thisType = spaceArray(iterator,8);
+        if thisType == 1
+            numLargeObjects = numLargeObjects + 1;
+        elseif thisType == 2
+            numSmallObjects = numSmallObjects + around(normrnd(30,15))+10;
+        elseif thisType == 3
+            numLargeObjects = numLargeObjects + 1;
+        elseif thisType == 4
+            numLargeObjects = numLargeObjects + 1;
+        elseif thisType ==5
+        end
+    end
+    
+    totObjects = numLargeObjects + numSmallObjects;
+    
+    %%%To use the FAA's collision risk calculator, values must be converted
+    %%%to km instead of m.
+    upperEdgeOrbit = 6371 + 800 + 10;
+    lowerEdgeOrbit = 6371 + 800 - 10;
+    volOrbit = 4/3*pi*upperEdgeOrbit^3 - 4/3*pi*lowerEdgeOrbit^3;
+    objectDensity = totObjects/volOrbit;
+    crossSectionalAreaISS =  74*110/(1000^2);
+    T = 60*60*24*365; %1 year in seconds
+    avOrbitalVelocity = 10; %m/s; see relative velocity section of FAA paper
+    riskToISS = 1-exp(-crossSectionalAreaISS*objectDensity*avOrbitalVelocity*T);    
+    %1-exp(-AC*SPD*VR*T) https://www.faa.gov/about/office_org/headquarters_offices/ast/media/poisson.pdf
+end

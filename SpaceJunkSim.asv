@@ -3,50 +3,44 @@ function safetyVal = SpaceJunkSim(input1,input2)
 
 %[1-3 randPos', 4-6 randVel', 7 size, 8 type, 9 nextLook]
 
-
-
-
-
-    delete 'distances.csv';
     global massOfEarth
     global gravitationalConstant
     global timestep
     massOfEarth = 5.972*(10^24);
     gravitationalConstant = 6.674*10^(-11);
-    timestep = .1;               %given in seconds
+    timestep = .05;               %given in seconds
     
     
     %Begin Independent Variables
-    totalIterations = 10000;
-    startNumJunkSatellites = 12000*.15;
-    startNumJunkClouds = 30000*.15;
+    totalTime = 2; %in days
+    totalIterations = 24*60*60*totalTime/timestep;
+    startNumJunkSatellites = 10000*.05;
+    startNumJunkClouds = 300000/100*.05;    %assume 100 small objects per cloud
     %startNumSmallObjects = 300000*.2;   %a pessimistic estimate of this area of orbit's beginning density
-    launchRate = 100; %per 10 iterations, right now. Will be changed to per day
+    launchRate = 10000; %per 10 iterations, right now. Will be changed to per day
     avSatelliteLife = 10000; %iterations, right now; will be changed to days
     rangeSatelliteLife = 10000; %iterations, right now; will be changed to days
     avJunkSize = 1; %m^2
     avCloudSize = 1000; %m^2
     avSatelliteSize = 10; %m^2
-    rangeOrbit = 10000;
-    rangeVel = 100;
     %Note: Normal speed in LEO is about 7.8 km/s. With some factor of
     %safety, 10 km/s
     maxVel = 10000; %m/s
 
     startNumLasers = 3;
-    startNumSatellites = 3;
+    startNumSatellites = 2000*.15;
     startNumCleaners = 3;  
     
     %Begin parameters
     %All distances in meters, weights in kg, time in sec
-    collisionDistance = 100;        %Any pass within 100 m is probabalistically considered a collision
+    collisionDistance = 100;        %Any pass within 100 m is considered a collision
     cloudDistance = 1000;           %Radius of a debris cloud within which there may be collision
     cleanerDistance = 5000;         %The maximum distance a cleaner satellite can reach; 5 km
     laserDistance = 100000;         %The maximum field of view of a laser; 100km
 
     %Earth's radius is 6,371,000 meters, + max 2,000,000 meters of altitude. Min 161000 m altitude.
-    spaceArray = []
-    laserArray = []
+    spaceArray = [];
+    laserArray = [];
     %spaceArray = tall(spaceArray);
     creatorObjectArray = [];
 
@@ -57,7 +51,7 @@ function safetyVal = SpaceJunkSim(input1,input2)
     datapoints = scatter3(xdata, ydata, zdata);
 
 
-    for x = 0:startNumJunkSatellites
+    for x = 1:startNumJunkSatellites
         %Creates spacejunk
         [randPos,randVel] = getOrbit();
         sizeObject = lognrnd(.2,1)*avJunkSize;
@@ -69,7 +63,7 @@ function safetyVal = SpaceJunkSim(input1,input2)
         %print(x)
     end
 
-    for x = 0:startNumJunkClouds
+    for x = 1:startNumJunkClouds
         %Creates spacejunk
         [randPos,randVel] = getOrbit();
         sizeObject = lognrnd(.2,1)*avCloudSize;
@@ -81,7 +75,7 @@ function safetyVal = SpaceJunkSim(input1,input2)
         %print(x)
     end
     
-    for x = 0:startNumSatellites   
+    for x = 1:startNumSatellites   
         %Creates satellites
         [randPos,randVel] = getOrbit();
         sizeObject = lognrnd(.666,1)*avSatelliteSize;
@@ -94,7 +88,7 @@ function safetyVal = SpaceJunkSim(input1,input2)
     end
 
 
-    for x = 0:startNumCleaners  
+    for x = 1:startNumCleaners  
         %Creates cleaners
         [randPos,randVel] = getOrbit();
         sizeObject = lognrnd(.666,1)*avSatelliteSize;
@@ -107,22 +101,32 @@ function safetyVal = SpaceJunkSim(input1,input2)
     end
 
 
-    for x = 0:startNumLasers
+    for x = 1:startNumLasers
         %Creates laser brooms
         avObjSize = 0;
         type = 5;
-        creatorObject = launchObject(type,avObjSize);
-        laserArray = [laserArray;creatorObject];
+        creatorObject = launchObject(type,avObjSize,0,[0,0,0]);
+        spaceArray = [spaceArray;creatorObject];
     end
+    
+    
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%Debug Section%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%    
+    %spaceArray(1,1:6) = spaceArray(2,1:6)+1; %crashes two satellites
+    
     
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%Measure Beginning Vars%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
 %Begin Dependent Variables
-objectDensity = 0;
+[startObjectDensity,startRiskToISS,startYearRisk,startSmallObjects,startLargeObjects,startSatRisk] = findStats(spaceArray);          %within applicable orbit, per one year
 avoidanceActions = 0;
-riskToISS = 0;
+largeObjectCollisions = 0;
+cloudCollisions = 0;
+cleanedDebris = 0;
+laseredDebris = 0;
     
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -134,49 +138,58 @@ riskToISS = 0;
 for iteration=1:totalIterations
     %If necessary, launch an additional satellite
     if mod(iteration,launchRate) == 0
-        tempCreator = launchObject(1,avJunkSize);
+        tempCreator = launchObject(1,avJunkSize,avJunkSize*.1);
         spaceArray = [spaceArray;tempCreator];
     end
 
     %Refresh the matrices we'll need
-    positionArray = spaceArray(:,1:3);
-    nextLookVec = spaceArray(:,9);
+    positionArray = [spaceArray(:,1:3);laserArray(:,1:3)];
+    nextLookVec = [spaceArray(:,9);laserArray(:,9)];
     
     objectsToLookAt = find(~nextLookVec);
     
     for iterator=1:length(objectsToLookAt)
         trueIndex = objectsToLookAt(iterator);
-        thisType = spaceArray(trueIndex,8);
-        thisDistances = (pdist2(positionArray,positionArray(trueIndex,:)))';
-        thisDistances(thisDistances==0) = 1e9;
+        thisWait = spaceArray(trueIndex,9);
+        if thisWait ~=0
+            thisType = spaceArray(trueIndex,8);
+            thisDistances = (pdist2(positionArray,positionArray(trueIndex,:)))';
+            thisDistances(thisDistances==0) = 1e9;
             if thisType == 1
                 collisionsIndexes = find(thisDistances<collisionDistance);
                 if ~isempty(collisionsIndexes)
-                    [spaceArray,positionArray] = collide(collisionsIndexes);
+                    spaceArray = collide(spaceArray,[trueIndex,collisionsIndexes]);
+                    largeObjectCollisions = largeObjectCollisions +1;
                 end
             elseif thisType == 2
                 cloudIndexes = find(thisDistances<cloudDistance);
                 if ~isempty(cloudIndexes)
-                    [spaceArray,positionArray] = cloud(cloudIndexes);
+                    spaceArray = cloud(spaceArray,[trueIndex,cloudIndexes]);
+                    cloudCollisions = cloudCollisions+1;
+                    %disp 'made a cloudcollision'
                 end
             elseif thisType == 3
                 collisionsIndexes = find(thisDistances<collisionDistance);
                 if ~isempty(collisionsIndexes)
-                    [spaceArray,positionArray] = collide(collisionsIndexes);
+                    avoidanceActions = avoidanceActions+1;
                 end
             elseif thisType == 4
                 cleanerIndexes = find(thisDistances<cleanerDistance);
                 if ~isempty(cleanerIndexes)
-                    [spaceArray,positionArray] = clean(cleanerIndexes);
+                    spaceArray = clean(spaceArray,cleanerIndexes,cleanFlag);
+                    cleanedDebris = cleanedDebris+1;
                 end
             elseif thisType ==5
                 laserIndexes = find(thisDistances<laserDistance);
                 if ~isempty(laserIndexes)
-                    [spaceArray,laserArray,positionArray] = laserShot(laserIndexes);
+                    [spaceArray] = laser([trueIndex,collisionsIndexes],spaceArray);
+                    laseredDebris = laseredDebris+1;
                 end
             end
-        
-        spaceArray(iterator,9) = floor(min(thisDistances)/(timestep*maxVel)); %FixMe: Not sure if this is precisely right
+            
+            if thisType 
+            spaceArray(iterator,9) = floor(min(thisDistances)/(timestep*maxVel)); %FixMe: Not sure if this is precisely right
+        end
     end
     
     spaceArray = move(spaceArray);
@@ -185,13 +198,14 @@ for iteration=1:totalIterations
     spaceArray(:,9) = spaceArray(:,9)-1;
     
     %Graph every so often
-    if mod(iteration,1000) == 0
-        xdata = positionArray(1:500,1);
-        ydata = positionArray(1:500,2);
-        zdata = positionArray(1:500,3);
-        scatter3(xdata,ydata,zdata)
-         pause(.01)
-    end
+%     if mod(iteration,10000) == 0
+%         xdata = positionArray(:,1);
+%         ydata = positionArray(:,2);
+%         zdata = positionArray(:,3);
+%         cdata = spaceArray(:,8);
+%         scatter3(xdata,ydata,zdata,cdata*20,cdata*50)
+%         pause(.0001)
+%     end
 
     %disp(iteration)
     %print(h.heap())
@@ -199,12 +213,11 @@ for iteration=1:totalIterations
 end
 
     
-%anim = animation.FuncAnimation(fig,update,frames=25,init_func=init,interval=200,blit=True)
-orbitRisk = 1;
-disp("Made to below anim")
-[temp,temp2] = size(spaceArray);
-disp(temp)
-disp(orbitRisk)
+
+spaceArray(spaceArray>1e10) = 0;
+spaceArray = spaceArray(any(spaceArray,2),:);
+
+[endObjectDensity,endRiskToISS,endYearRisk,endSmallObjects,endLargeObjects,endSatRisk,sumEndSatRisk] = findStats(spaceArray);
     
 
 end
