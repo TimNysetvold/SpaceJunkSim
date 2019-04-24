@@ -1,0 +1,8 @@
+#!/bin/bash
+for repeats in {1..5}
+do
+for runs in {1..12}
+do
+sbatch repeator ${runs}
+done
+done
